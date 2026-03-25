@@ -22,10 +22,6 @@
           <span class="eyebrow">Search &amp; Edit Orders</span>
 
         </div>
-        <div class="top-actions">
-          <button class="ghost-btn" id="printTableBtn" type="button">Print Table</button>
-          <button class="primary-btn" id="newRecordBtn" type="button">+ Add Record</button>
-        </div>
       </header>
 
       <div id="noticeBar" class="notice-bar" aria-live="polite"></div>
@@ -53,14 +49,48 @@
         </article>
       </section>
 
+      <section class="list-tools-bar page-panel-lite">
+        <div class="list-tools-header">
+          <div class="list-tools-title">Print / Receipt Controls</div>
+          <div class="list-tools-actions">
+            <div class="top-actions">
+            
+           </div>
+            
+            <input id="listReceiptStart" class="receipt-input compact-input" type="number" min="1" step="1" placeholder=" Start" />
+            <input id="listReceiptEnd" class="receipt-input compact-input" type="number" min="1" step="1" placeholder=" End" />
+            <button class="qr-toggle-btn compact-btn" id="listQrToggleBtn" type="button" aria-pressed="true">QR: ON</button>
+            <button class="ghost-btn compact-btn" id="saveTableImgBtn" type="button">Share IMG</button>
+            <button class="ghost-btn" id="printTableBtn" type="button">Print Table</button>
+            <button class="primary-btn" id="newRecordBtn" type="button">+ Add Record</button>
+          </div>
+        </div>
+      </section>
+
       <section class="card">
         <div class="toolbar">
-          <div class="smart-search-wrap">
-            <span class="search-icon">🔎</span>
-            <input id="searchInput" class="smart-search" placeholder="Search by customer, phone, product..." />
-          </div>
+          <div class="toolbar-filters toolbar-filters--one-row">
+            <div class="smart-search-wrap toolbar-search">
+              <span class="search-icon">🔎</span>
+              <input id="searchInput" class="smart-search" placeholder="Search..." />
+            </div>
 
-          <div class="toolbar-filters">
+            <select id="deliveryFilter" class="select">
+              <option value="">Delivery</option>
+              <option value="ភ្នំពេញ តាធំ">ភ្នំពេញ តាធំ</option>
+              <option value="ភ្នំពេញ តាតូច">ភ្នំពេញ តាតូច</option>
+              <option value="DRSB">DRSB</option>
+              <option value="J&T">J&amp;T</option>
+              <option value="វិរៈ ប៊ុនថាំ">វិរៈ ប៊ុនថាំ</option>
+              <option value="ដឹកខ្លួនឯង">ដឹកខ្លួនឯង</option>
+            </select>
+
+            <select id="provinceFilter" class="select">
+              <option value="">Province</option>
+              <option value="pp">រាជធានីភ្នំពេញ</option>
+              <option value="province">ខេត្ត</option>
+            </select>
+
             <select id="statusFilter" class="select">
               <option value="">All Status</option>
               <option value="Pending">Pending</option>
@@ -68,11 +98,46 @@
               <option value="Delivered">Delivered</option>
               <option value="Cancel">Cancel</option>
             </select>
+
             <select id="pageFilter" class="select"><option value="">All Pages</option></select>
             <select id="closeByFilter" class="select"><option value="">All CloseBy</option></select>
-            <input id="startDateFilter" type="date" class="select" />
-            <input id="endDateFilter" type="date" class="select" />
-            <button class="ghost-btn" id="clearFiltersBtn" type="button">Reset</button>
+
+            <div class="date-range-wrap">
+              <input id="startDateFilter" type="hidden" />
+              <input id="endDateFilter" type="hidden" />
+              <button class="select date-range-trigger" id="dateRangeTrigger" type="button">
+                <span class="date-range-label">Select Date</span>
+                <span class="date-range-text" id="dateRangeText">Start Date → End Date</span>
+              </button>
+
+              <div class="date-range-pop" id="dateRangePop" hidden>
+                <div class="date-range-presets">
+                  <button class="range-preset" data-range="today" type="button">Today</button>
+                  <button class="range-preset" data-range="yesterday" type="button">Yesterday</button>
+                  <button class="range-preset" data-range="last7" type="button">Last 7 days</button>
+                  <button class="range-preset" data-range="last30" type="button">Last 30 days</button>
+                  <button class="range-preset" data-range="thisMonth" type="button">This month</button>
+                  <button class="range-preset" data-range="lastMonth" type="button">Last month</button>
+                  <button class="range-preset" data-range="clear" type="button">Clear</button>
+                </div>
+                <div class="date-range-fields">
+                  <div class="date-field">
+                    <label for="dateRangeStartUi">Start Date</label>
+                    <input id="dateRangeStartUi" type="date" class="input" />
+                  </div>
+                  <div class="date-field">
+                    <label for="dateRangeEndUi">End Date</label>
+                    <input id="dateRangeEndUi" type="date" class="input" />
+                  </div>
+                </div>
+                <div class="date-range-actions">
+                  <button class="ghost-btn compact-btn" id="dateRangeCancelBtn" type="button">Cancel</button>
+                  <button class="primary-btn compact-btn" id="dateRangeApplyBtn" type="button">Update</button>
+                </div>
+              </div>
+            </div>
+
+            <button class="ghost-btn toolbar-reset" id="clearFiltersBtn" type="button">Reset</button>
           </div>
         </div>
 
@@ -111,11 +176,14 @@
 
       <div class="drawer-panel">
         <div class="drawer-head">
-          <div>
+          <div class="drawer-head-copy">
             <h2>Order Detail</h2>
             <p>កែប្រែទិន្នន័យ គណនាតម្លៃឡើងវិញ Share និង Print បានភ្លាមៗ។</p>
           </div>
-          <button class="ghost-btn" id="closeDrawerBtn" type="button">Close</button>
+          <div class="drawer-head-actions">
+            <button class="ghost-btn drawer-copy-btn" id="copyDetailBtn" type="button" title="Copy Text">📋 Copy Text</button>
+            <button class="ghost-btn drawer-close-icon" id="closeDrawerBtn" type="button" aria-label="Close">✕</button>
+          </div>
         </div>
 
         <div class="detail-summary">
