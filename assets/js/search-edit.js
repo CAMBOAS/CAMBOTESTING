@@ -352,6 +352,102 @@ function refreshDrawerTotals() {
   qs('editGrandTotal').value = fmtMoney(calcOrderTotal(order));
 }
 
+
+function formatCopyMoney(value) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function buildCopyReceiptText(order) {
+  const dateText = formatDateForShare(order.date);
+  const addressText = (order.address || '-').trim() || '-';
+  const provinceText = (order.province || '-').trim() || '-';
+  const locationText = `${addressText} | ${provinceText}`;
+  const deliveryText = (order.deliveryName || '-').trim() || '-';
+  const noteText = (order.note || '-').trim() || '-';
+  const pageText = (order.page || '-').trim() || '-';
+  const closeByText = (order.closeBy || '-').trim() || '-';
+  const paymentText = (order.payment || '-').trim() || '-';
+
+  const itemsTotal = (order.products || []).reduce((sum, item) => sum + calcSubtotal(item), 0);
+  const deliveryFee = Math.max(0, Number(order.deliveryFee || 0));
+  const grand = itemsTotal + deliveryFee;
+  const grandRiel = Math.round(grand * 4100);
+
+  const separator = '..................................................';
+  const lines = [
+    `វិក័យប័ត្រ | ${dateText}`,
+    separator,
+    `ឈ្មោះ: ${order.customer || '-'}`,
+    `លេខទូរសព្ទ: ${order.phone || '-'}`,
+    `ទីតាំង: ${locationText}`,
+    `ដឹកជញ្ជូន: ${deliveryText}`,
+    `Note: ${noteText}`,
+    separator,
+    'បញ្ជីផលិតផល',
+    separator
+  ];
+
+  (order.products || []).forEach((item, index) => {
+    const qty = Number(item.qty || 0);
+    const price = formatCopyMoney(item.price || 0);
+    const subtotal = formatCopyMoney(calcSubtotal(item));
+    lines.push(`${index + 1}. ${item.name || '-'}`);
+    lines.push(`• ចំនួន: ${qty} ឈុត តម្លៃ: ${price} សរុប: ${subtotal}`);
+  });
+
+  lines.push(separator);
+  lines.push(`តម្លៃសរុប៖ : ${formatCopyMoney(itemsTotal)}`);
+  lines.push(`សេវាដឹក៖ : ${formatCopyMoney(deliveryFee)}`);
+  lines.push(`ការទូទាត់៖ ${paymentText} : ${formatCopyMoney(grand)}`);
+  lines.push(`ប្រាក់រៀល : ${grandRiel.toLocaleString()}៛`);
+  lines.push(separator);
+  lines.push(`Page: ${pageText} | ${closeByText}`);
+  lines.push('លេខបម្រើអតិថិជន៖ • 015 58 68 78 / 089 58 68 78');
+  lines.push(separator);
+
+  return lines.join('\n');
+}
+
+async function copyCurrentOrderText() {
+  const order = readOrderFromForm();
+  if (!order.products.some(line => line.name)) {
+    showNotice('សូមបញ្ចូលផលិតផលជាមុនសិន។', 'error');
+    return;
+  }
+  const text = buildCopyReceiptText(order);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-99999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    showNotice('Copy Text បានជោគជ័យ', 'success');
+    const btn = qs('copyDetailBtn');
+    if (btn) {
+      const original = btn.dataset.originalText || btn.textContent;
+      btn.dataset.originalText = original;
+      btn.textContent = 'Copied ✓';
+      btn.classList.add('copy-success');
+      clearTimeout(btn._copyTimer);
+      btn._copyTimer = setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('copy-success');
+      }, 1800);
+    }
+    setTimeout(clearNotice, 1800);
+  } catch (error) {
+    showNotice('Copy មិនបានទេ', 'error');
+  }
+}
+
 function buildShareText(order) {
   const lines = [];
   lines.push(`Order: ${order.id || 'AUTO'}`);
@@ -1298,13 +1394,136 @@ async function shareInvoiceImage() {
   }, 'image/png');
 }
 
+function readListPrintSettings() {
+  const startRaw = Number(qs('listReceiptStart')?.value || 0);
+  const endRaw = Number(qs('listReceiptEnd')?.value || 0);
+  const start = Number.isFinite(startRaw) && startRaw > 0 ? Math.floor(startRaw) : 0;
+  const end = Number.isFinite(endRaw) && endRaw > 0 ? Math.floor(endRaw) : 0;
+  const qrBtn = qs('listQrToggleBtn');
+  const qrEnabled = qrBtn ? !qrBtn.classList.contains('off') : true;
+  return { start, end, qrEnabled };
+}
+
+function cloneOrders(rows) {
+  return Array.isArray(rows)
+    ? rows.map(order => ({
+        ...order,
+        products: (order.products || []).map(product => ({ ...product }))
+      }))
+    : [];
+}
+
+function applyListPrintSettings(rows) {
+  const { start, end, qrEnabled } = readListPrintSettings();
+  const working = cloneOrders(rows);
+  if (!working.length) return [];
+
+  const receiptStart = start || 1;
+  const fromIndex = Math.max(receiptStart - 1, 0);
+  const toIndex = end && end >= receiptStart ? end : working.length;
+
+  return working.slice(fromIndex, toIndex).map((order, index) => ({
+    ...order,
+    showQrEnabled: qrEnabled,
+    receiptNo: String(receiptStart + index)
+  }));
+}
+
+async function sharePreparedOrdersAsImage(orders) {
+  if (!Array.isArray(orders) || !orders.length) {
+    showNotice('មិនមានទិន្នន័យសម្រាប់ Share IMG ទេ។', 'error');
+    return;
+  }
+
+  if (typeof html2canvas !== 'function') {
+    showNotice('Share IMG failed. html2canvas is missing.', 'error');
+    return;
+  }
+
+  showNotice('Preparing Share IMG...', 'info');
+  const stage = document.createElement('div');
+  stage.className = 'share-capture-stage';
+  stage.style.position = 'fixed';
+  stage.style.left = '-99999px';
+  stage.style.top = '0';
+  stage.style.zIndex = '-1';
+  stage.innerHTML = `<style>${getShareReceiptStyles()}</style><div class="share-capture-shell">${orders.map(order => buildShareReceiptHTML(order)).join('')}</div>`;
+  document.body.appendChild(stage);
+
+  try {
+    await waitForImages(stage);
+    const shell = stage.querySelector('.share-capture-shell');
+    const canvas = await html2canvas(shell, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: shell.scrollWidth,
+      windowHeight: shell.scrollHeight
+    });
+    const dataUrl = canvas.toDataURL('image/png');
+    const filename = `orders_${new Date().toISOString().slice(0, 10)}.png`;
+
+    if (navigator.canShare && navigator.share) {
+      const file = dataUrlToFile(dataUrl, filename);
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: `Orders (${orders.length})`,
+          files: [file]
+        });
+        showNotice('Share IMG ready.', 'success');
+        setTimeout(clearNotice, 1800);
+        return;
+      }
+    }
+
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showNotice('Share IMG downloaded as PNG.', 'success');
+    setTimeout(clearNotice, 2200);
+  } catch (error) {
+    console.error(error);
+    showNotice('Share IMG failed.', 'error');
+  } finally {
+    stage.remove();
+  }
+}
+
+async function shareTableAsImage() {
+  const rows = filterOrders();
+  if (!rows.length) {
+    showNotice('មិនមានទិន្នន័យក្រោយ filter សម្រាប់ Share IMG ទេ។', 'error');
+    return;
+  }
+
+  const preparedRows = applyListPrintSettings(rows);
+  if (!preparedRows.length) {
+    showNotice('មិនមានលេខ receipt ត្រូវ Share ទេ។', 'error');
+    return;
+  }
+
+  await sharePreparedOrdersAsImage(preparedRows);
+}
+
 function printFilteredOrders() {
   const rows = filterOrders();
   if (!rows.length) {
     showNotice('មិនមានទិន្នន័យក្រោយ filter សម្រាប់ព្រីនទេ។', 'error');
     return;
   }
-  printOrdersCollection(rows, `Print ${rows.length} Orders`);
+  const preparedRows = applyListPrintSettings(rows);
+  if (!preparedRows.length) {
+    showNotice('មិនមានលេខ receipt ត្រូវព្រីនទេ។', 'error');
+    return;
+  }
+  printOrdersCollection(preparedRows, `Print ${preparedRows.length} Orders`);
 }
 
 function printCurrentOrderDetail() {
@@ -1360,7 +1579,7 @@ function buildServerParams() {
 async function loadOrders() {
   const params = buildServerParams();
   currentServerMode = params.limit ? 'latest' : 'range';
-  showNotice(currentServerMode === 'latest' ? 'Loading latest orders...' : 'Loading selected date range...', 'info');
+  showNotice(currentServerMode === 'latest' ? 'Loading latest orders...' : 'កំពុងផ្ទុកទិន្នន័យ...', 'info');
   const data = await apiGet(params);
   currentOrders = extractOrders(data).map(normalizeOrder);
   renderFilterOptions();
@@ -1398,7 +1617,7 @@ function triggerServerReload() {
 }
 
 function bindEvents() {
-  ['searchInput','statusFilter','pageFilter','closeByFilter'].forEach(id => {
+  ['searchInput','deliveryFilter','provinceFilter','statusFilter','pageFilter','closeByFilter'].forEach(id => {
     qs(id)?.addEventListener('input', renderTable);
     qs(id)?.addEventListener('change', renderTable);
   });
@@ -1408,10 +1627,14 @@ function bindEvents() {
   });
 
   qs('clearFiltersBtn')?.addEventListener('click', () => {
-    ['searchInput','statusFilter','pageFilter','closeByFilter','startDateFilter','endDateFilter','globalSearch'].forEach(id => {
+    ['searchInput','deliveryFilter','provinceFilter','statusFilter','pageFilter','closeByFilter','startDateFilter','endDateFilter','globalSearch'].forEach(id => {
       const el = qs(id);
       if (el) el.value = '';
     });
+    if (qs('dateRangeStartUi')) qs('dateRangeStartUi').value = '';
+    if (qs('dateRangeEndUi')) qs('dateRangeEndUi').value = '';
+    setDateRangeDisplay('Select Date', '', '');
+    markActivePreset('clear');
     renderTable();
     triggerServerReload();
   });
@@ -1490,12 +1713,29 @@ function bindEvents() {
   });
 
   qs('newRecordBtn')?.addEventListener('click', () => openDrawer('', true));
+
+  qs('listQrToggleBtn')?.addEventListener('click', () => {
+    const btn = qs('listQrToggleBtn');
+    if (!btn) return;
+    btn.classList.toggle('off');
+    const isOn = !btn.classList.contains('off');
+    btn.textContent = isOn ? 'QR: ON' : 'QR: OFF';
+    btn.setAttribute('aria-pressed', String(isOn));
+  });
+
+  qs('saveTableImgBtn')?.addEventListener('click', () => {
+    shareTableAsImage().catch(error => {
+      console.error(error);
+      showNotice(error.message || 'Share IMG failed.', 'error');
+    });
+  });
   qs('printTableBtn')?.addEventListener('click', printFilteredOrders);
   qs('printDetailBtn')?.addEventListener('click', printCurrentOrderDetail);
 }
 
 async function bootSearchEditPage() {
   if (!qs('resultsBody')) return;
+  initDateRangePicker();
   bindEvents();
   try {
     await loadOrders();
@@ -1508,4 +1748,197 @@ async function bootSearchEditPage() {
   }
 }
 
+
+
+/* ===== Custom Date Range Picker ===== */
+function formatRangeText(start, end) {
+  if (!start && !end) return 'Start Date → End Date';
+  if (start && end) return `${start} → ${end}`;
+  return `${start || '...'} → ${end || '...'}`;
+}
+
+function setDateRangeDisplay(label, start, end) {
+  const labelEl = qs('dateRangeTrigger')?.querySelector('.date-range-label');
+  const textEl = qs('dateRangeText');
+  if (labelEl) labelEl.textContent = label || 'Custom';
+  if (textEl) textEl.textContent = formatRangeText(start, end);
+}
+
+function openDateRangePop() {
+  const pop = qs('dateRangePop');
+  if (!pop) return;
+  qs('dateRangeStartUi').value = qs('startDateFilter')?.value || '';
+  qs('dateRangeEndUi').value = qs('endDateFilter')?.value || '';
+  pop.hidden = false;
+}
+
+function closeDateRangePop() {
+  const pop = qs('dateRangePop');
+  if (pop) pop.hidden = true;
+}
+
+function applyDateRange(start, end, label = 'Custom', options = {}) {
+  let normalizedStart = start || '';
+  let normalizedEnd = end || '';
+  if (normalizedStart && normalizedEnd && normalizedStart > normalizedEnd) {
+    [normalizedStart, normalizedEnd] = [normalizedEnd, normalizedStart];
+  }
+  const startEl = qs('startDateFilter');
+  const endEl = qs('endDateFilter');
+  if (startEl) startEl.value = normalizedStart;
+  if (endEl) endEl.value = normalizedEnd;
+  setDateRangeDisplay(label, normalizedStart, normalizedEnd);
+  renderTable();
+  closeDateRangePop();
+  if (options.reload !== false) triggerServerReload();
+}
+
+function getTodayLocal() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function shiftDate(base, diff) {
+  const d = new Date(base + 'T00:00:00');
+  d.setDate(d.getDate() + diff);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getMonthStart(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function getMonthEnd(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+}
+
+function getLastMonthRange(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const first = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  const last = new Date(d.getFullYear(), d.getMonth(), 0);
+  const start = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(first.getDate()).padStart(2, '0')}`;
+  const end = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+  return { start, end };
+}
+
+function markActivePreset(value) {
+  document.querySelectorAll('.range-preset').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === value);
+  });
+}
+
+function handlePresetRange(type) {
+  const today = getTodayLocal();
+
+  if (type === 'today') {
+    applyDateRange(today, today, 'Today');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'yesterday') {
+    const y = shiftDate(today, -1);
+    applyDateRange(y, y, 'Yesterday');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'last7') {
+    applyDateRange(shiftDate(today, -6), today, 'Last 7 days');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'last14') {
+    applyDateRange(shiftDate(today, -13), today, 'Last 14 days');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'last30') {
+    applyDateRange(shiftDate(today, -29), today, 'Last 30 days');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'thisMonth') {
+    applyDateRange(getMonthStart(today), getMonthEnd(today), 'This month');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'lastMonth') {
+    const r = getLastMonthRange(today);
+    applyDateRange(r.start, r.end, 'Last month');
+    markActivePreset(type);
+    return;
+  }
+  if (type === 'clear') {
+    applyDateRange('', '', 'No filter');
+    markActivePreset(type);
+  }
+}
+
+function initDateRangePicker() {
+  const trigger = qs('dateRangeTrigger');
+  const pop = qs('dateRangePop');
+  const applyBtn = qs('dateRangeApplyBtn');
+  const cancelBtn = qs('dateRangeCancelBtn');
+  const startUi = qs('dateRangeStartUi');
+  const endUi = qs('dateRangeEndUi');
+  const startHidden = qs('startDateFilter');
+  const endHidden = qs('endDateFilter');
+
+  if (!trigger || !pop || !applyBtn || !cancelBtn || !startUi || !endUi || !startHidden || !endHidden) return;
+
+  if (!startHidden.value && !endHidden.value) {
+    const today = getTodayLocal();
+    startHidden.value = today;
+    endHidden.value = today;
+    markActivePreset('today');
+    setDateRangeDisplay('Today', today, today);
+  } else {
+    setDateRangeDisplay('Custom', startHidden.value || '', endHidden.value || '');
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (pop.hidden) openDateRangePop();
+    else closeDateRangePop();
+  });
+
+  cancelBtn.addEventListener('click', closeDateRangePop);
+
+  applyBtn.addEventListener('click', () => {
+    applyDateRange(startUi.value || '', endUi.value || '', 'Custom');
+    markActivePreset('');
+  });
+
+  document.querySelectorAll('.range-preset').forEach(btn => {
+    btn.addEventListener('click', () => handlePresetRange(btn.dataset.range));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!pop.hidden && !e.target.closest('.date-range-wrap')) {
+      closeDateRangePop();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) closeDateRangePop();
+  });
+}
+
 document.addEventListener('DOMContentLoaded', bootSearchEditPage);
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const copyBtn = qs('copyDetailBtn');
+  if (copyBtn && !copyBtn.dataset.boundCopy) {
+    copyBtn.dataset.boundCopy = '1';
+    copyBtn.addEventListener('click', copyCurrentOrderText);
+  }
+});
